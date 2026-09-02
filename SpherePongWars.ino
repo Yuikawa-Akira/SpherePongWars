@@ -18,7 +18,7 @@
 namespace {
 
 constexpr int kGridSize = 8;
-constexpr int kAgentPairs = 3;
+constexpr int kAgentPairs = 4;
 constexpr int kAgentCount = kAgentPairs * 2;
 constexpr float kBallSpeed = 0.085f;
 constexpr float kBallSize = 0.12f;
@@ -72,6 +72,10 @@ float rotationX = 0;
 float rotationY = 0;
 float spinX = 0;
 float spinY = 0.015f;
+float viewSinX = 0;
+float viewCosX = 1;
+float viewSinY = 0;
+float viewCosY = 1;
 uint8_t colorIndex = 0;
 uint32_t rngState = 1;
 
@@ -125,16 +129,19 @@ Vec3 multiply(const Vec3& value, float scale) {
   return { value.x * scale, value.y * scale, value.z * scale };
 }
 
+void updateViewRotationCache() {
+  viewSinX = sinf(rotationX);
+  viewCosX = cosf(rotationX);
+  viewSinY = sinf(rotationY);
+  viewCosY = cosf(rotationY);
+}
+
 Vec3 rotateView(const Vec3& source) {
-  const float sinX = sinf(rotationX);
-  const float cosX = cosf(rotationX);
-  const float sinY = sinf(rotationY);
-  const float cosY = cosf(rotationY);
-  const float y1 = source.y * cosX - source.z * sinX;
-  const float z1 = source.y * sinX + source.z * cosX;
-  return { source.x * cosY - z1 * sinY,
+  const float y1 = source.y * viewCosX - source.z * viewSinX;
+  const float z1 = source.y * viewSinX + source.z * viewCosX;
+  return { source.x * viewCosY - z1 * viewSinY,
            y1,
-           source.x * sinY + z1 * cosY };
+           source.x * viewSinY + z1 * viewCosY };
 }
 
 uint32_t darken(uint32_t color, float amount) {
@@ -218,6 +225,7 @@ void resetGame() {
   if (!rngState) rngState = millis() | 1;
   rotationX = randomFloat(-0.20f, 0.20f);
   rotationY = randomFloat(0.0f, kTau);
+  updateViewRotationCache();
   spinX = 0;
   spinY = 0.015f;
   for (size_t i = 0; i < quads.size(); ++i) {
@@ -310,6 +318,7 @@ void updateTouchRotation() {
   }
   rotationX += spinX;
   rotationY += spinY;
+  updateViewRotationCache();
   spinX *= 0.994f;
   spinY = 0.015f + (spinY - 0.015f) * 0.994f;
 }
@@ -440,7 +449,7 @@ void setup() {
   auto config = M5.config();
   M5.begin(config);
   Serial.begin(115200);
-  M5.Display.setBrightness(115);
+  M5.Display.setBrightness(100);
   screenWidth = M5.Display.width();
   screenHeight = M5.Display.height();
   centerX = screenWidth * 0.5f;
