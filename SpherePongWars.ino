@@ -18,7 +18,7 @@
 namespace {
 
 constexpr int kGridSize = 8;
-constexpr int kAgentPairs = 2;
+constexpr int kAgentPairs = 3;
 constexpr int kAgentCount = kAgentPairs * 2;
 constexpr float kBallSpeed = 0.085f;
 constexpr float kBallSize = 0.12f;
@@ -76,7 +76,8 @@ uint8_t colorIndex = 0;
 uint32_t rngState = 1;
 
 constexpr uint32_t kNeonColors[6] = {
-    0x00FF9D, 0x00E5FF, 0xFF2ED1, 0xFFD60A, 0x9DFF00, 0xFF5A36};
+  0x00FF9D, 0x00E5FF, 0xFF2ED1, 0xFFD60A, 0x9DFF00, 0xFF5A36
+};
 
 uint32_t nextRandom() {
   uint32_t value = rngState;
@@ -97,9 +98,9 @@ float dot(const Vec3& a, const Vec3& b) {
 }
 
 Vec3 cross(const Vec3& a, const Vec3& b) {
-  return {a.y * b.z - a.z * b.y,
-          a.z * b.x - a.x * b.z,
-          a.x * b.y - a.y * b.x};
+  return { a.y * b.z - a.z * b.y,
+           a.z * b.x - a.x * b.z,
+           a.x * b.y - a.y * b.x };
 }
 
 float normalize(Vec3& value) {
@@ -113,15 +114,15 @@ float normalize(Vec3& value) {
 }
 
 Vec3 add(const Vec3& a, const Vec3& b) {
-  return {a.x + b.x, a.y + b.y, a.z + b.z};
+  return { a.x + b.x, a.y + b.y, a.z + b.z };
 }
 
 Vec3 subtract(const Vec3& a, const Vec3& b) {
-  return {a.x - b.x, a.y - b.y, a.z - b.z};
+  return { a.x - b.x, a.y - b.y, a.z - b.z };
 }
 
 Vec3 multiply(const Vec3& value, float scale) {
-  return {value.x * scale, value.y * scale, value.z * scale};
+  return { value.x * scale, value.y * scale, value.z * scale };
 }
 
 Vec3 rotateView(const Vec3& source) {
@@ -131,22 +132,20 @@ Vec3 rotateView(const Vec3& source) {
   const float cosY = cosf(rotationY);
   const float y1 = source.y * cosX - source.z * sinX;
   const float z1 = source.y * sinX + source.z * cosX;
-  return {source.x * cosY - z1 * sinY,
-          y1,
-          source.x * sinY + z1 * cosY};
+  return { source.x * cosY - z1 * sinY,
+           y1,
+           source.x * sinY + z1 * cosY };
 }
 
 uint32_t darken(uint32_t color, float amount) {
   const uint8_t r = ((color >> 16) & 255) * amount;
   const uint8_t g = ((color >> 8) & 255) * amount;
   const uint8_t b = (color & 255) * amount;
-  return (static_cast<uint32_t>(r) << 16) |
-         (static_cast<uint32_t>(g) << 8) | b;
+  return (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | b;
 }
 
 float triangleSign(const Vec2& p1, const Vec2& p2, const Vec2& p3) {
-  return (p1.x - p3.x) * (p2.y - p3.y) -
-         (p2.x - p3.x) * (p1.y - p3.y);
+  return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
 }
 
 bool pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b,
@@ -154,17 +153,14 @@ bool pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b,
   const float d1 = triangleSign(p, a, b);
   const float d2 = triangleSign(p, b, c);
   const float d3 = triangleSign(p, c, a);
-  return !((d1 < 0 || d2 < 0 || d3 < 0) &&
-           (d1 > 0 || d2 > 0 || d3 > 0));
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 }
 
 void createQuadSphere() {
   vertices.clear();
   quads.clear();
-  const Vec3 normals[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
-                           {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-  const Vec3 tangents[6] = {{0, 1, 0}, {0, 1, 0}, {1, 0, 0},
-                            {1, 0, 0}, {1, 0, 0}, {1, 0, 0}};
+  const Vec3 normals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+  const Vec3 tangents[6] = { { 0, 1, 0 }, { 0, 1, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 } };
   int vertexOffset = 0;
   for (int face = 0; face < 6; ++face) {
     const Vec3 bitangent = cross(normals[face], tangents[face]);
@@ -190,9 +186,9 @@ void createQuadSphere() {
         quad.vertex[3] = second;
         quad.team = face < 3 ? kTeamNeon : kTeamTransparent;
         quad.center = multiply(
-            add(add(vertices[quad.vertex[0]], vertices[quad.vertex[1]]),
-                add(vertices[quad.vertex[2]], vertices[quad.vertex[3]])),
-            0.25f);
+          add(add(vertices[quad.vertex[0]], vertices[quad.vertex[1]]),
+              add(vertices[quad.vertex[2]], vertices[quad.vertex[3]])),
+          0.25f);
         quads.push_back(quad);
       }
     }
@@ -232,13 +228,13 @@ void resetGame() {
   for (int i = 0; i < kAgentCount; ++i) {
     Agent& agent = agents[i];
     agent.team = (i & 1) == 0 ? kTeamTransparent : kTeamNeon;
-    Vec3 position = {0, 0, 1};
+    Vec3 position = { 0, 0, 1 };
     int quad = -1;
     for (int attempt = 0; attempt < 512; ++attempt) {
       const float azimuth = randomFloat(0.0f, kTau);
       const float z = randomFloat(-0.92f, 0.92f);
       const float radial = sqrtf(1.0f - z * z);
-      position = {cosf(azimuth) * radial, sinf(azimuth) * radial, z};
+      position = { cosf(azimuth) * radial, sinf(azimuth) * radial, z };
       if (rotateView(position).z > -0.18f) continue;
       quad = findClosestQuad(position);
       if (quad < 0 || quads[quad].team != agent.team) continue;
@@ -257,8 +253,8 @@ void resetGame() {
 
     Vec3 tangent;
     do {
-      tangent = {randomFloat(-1.0f, 1.0f), randomFloat(-1.0f, 1.0f),
-                 randomFloat(-1.0f, 1.0f)};
+      tangent = { randomFloat(-1.0f, 1.0f), randomFloat(-1.0f, 1.0f),
+                  randomFloat(-1.0f, 1.0f) };
       tangent = subtract(tangent, multiply(position, dot(tangent, position)));
     } while (normalize(tangent) < 0.10f);
     agent.velocity = multiply(tangent, kBallSpeed);
@@ -274,8 +270,7 @@ void updateAgents() {
       agent.velocity = multiply(tangentVelocity, kBallSpeed);
     }
     const int nextQuad = findClosestQuad(next);
-    if (nextQuad >= 0 && agent.currentQuad >= 0 &&
-        quads[nextQuad].team != agent.team) {
+    if (nextQuad >= 0 && agent.currentQuad >= 0 && quads[nextQuad].team != agent.team) {
       quads[nextQuad].team = agent.team;
       Vec3 wall = subtract(quads[nextQuad].center,
                            quads[agent.currentQuad].center);
@@ -285,7 +280,7 @@ void updateAgents() {
       wall.z += randomFloat(-kReflectionRandomness, kReflectionRandomness);
       normalize(wall);
       agent.velocity = subtract(
-          agent.velocity, multiply(wall, 2.0f * dot(agent.velocity, wall)));
+        agent.velocity, multiply(wall, 2.0f * dot(agent.velocity, wall)));
     }
     agent.position = add(agent.position, agent.velocity);
     normalize(agent.position);
@@ -328,8 +323,8 @@ void drawScene() {
     rotatedVertices[i] = rotateView(vertices[i]);
     const float depth = rotatedVertices[i].z + kCameraZ;
     const float scale = fov / depth;
-    projectedVertices[i] = {centerX + rotatedVertices[i].x * scale,
-                            centerY + rotatedVertices[i].y * scale};
+    projectedVertices[i] = { centerX + rotatedVertices[i].x * scale,
+                             centerY + rotatedVertices[i].y * scale };
   }
   for (size_t i = 0; i < quads.size(); ++i) {
     quads[i].depth = rotateView(quads[i].center).z;
@@ -349,10 +344,16 @@ void drawScene() {
     const Vec3 edge2 = subtract(rotatedVertices[quad.vertex[2]],
                                 rotatedVertices[quad.vertex[0]]);
     const Vec3 normal = cross(edge1, edge2);
-    const float facing = dot(normal, multiply(rotatedVertices[quad.vertex[0]], -1));
+    //const float facing = dot(normal, multiply(rotatedVertices[quad.vertex[0]], -1));
+    const Vec3& surfacePoint = rotatedVertices[quad.vertex[0]];
+    const Vec3 surfaceToCamera = {
+      -surfacePoint.x, -surfacePoint.y, -kCameraZ - surfacePoint.z
+    };
+    const float facing = dot(normal, surfaceToCamera);
     std::array<Vec2, 4> points = {
-        projectedVertices[quad.vertex[0]], projectedVertices[quad.vertex[1]],
-        projectedVertices[quad.vertex[2]], projectedVertices[quad.vertex[3]]};
+      projectedVertices[quad.vertex[0]], projectedVertices[quad.vertex[1]],
+      projectedVertices[quad.vertex[2]], projectedVertices[quad.vertex[3]]
+    };
     if (facing >= 0) visibleFrontNeon.push_back(points);
     const uint32_t faceColor = facing < 0 ? darkNeon : neon;
     canvas.fillTriangle(points[0].x, points[0].y, points[1].x, points[1].y,
@@ -366,13 +367,12 @@ void drawScene() {
     const bool onBack = rotatedPosition.z > 0;
     const float depth = rotatedPosition.z + kCameraZ;
     const float scale = fov / depth;
-    const Vec2 center = {centerX + rotatedPosition.x * scale,
-                         centerY + rotatedPosition.y * scale};
+    const Vec2 center = { centerX + rotatedPosition.x * scale,
+                          centerY + rotatedPosition.y * scale };
     bool occluded = false;
     if (onBack) {
       for (const auto& quad : visibleFrontNeon) {
-        if (pointInTriangle(center, quad[0], quad[1], quad[2]) ||
-            pointInTriangle(center, quad[0], quad[2], quad[3])) {
+        if (pointInTriangle(center, quad[0], quad[1], quad[2]) || pointInTriangle(center, quad[0], quad[2], quad[3])) {
           occluded = true;
           break;
         }
@@ -384,30 +384,32 @@ void drawScene() {
     if (agent.team == kTeamNeon) {
       const int behind = findClosestQuad(multiply(agent.position, -1));
       ballColor = behind >= 0 && quads[behind].team == kTeamNeon
-                      ? darkNeon : TFT_BLACK;
+                    ? darkNeon
+                    : TFT_BLACK;
     } else {
       ballColor = onBack ? darkNeon : neon;
     }
 
     Vec3 normal = agent.position;
-    Vec3 up = fabsf(normal.y) > 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+    Vec3 up = fabsf(normal.y) > 0.9f ? Vec3{ 1, 0, 0 } : Vec3{ 0, 1, 0 };
     Vec3 tangent = cross(up, normal);
     normalize(tangent);
     Vec3 bitangent = cross(normal, tangent);
     normalize(bitangent);
     const float halfSize = kBallSize / depth;
     Vec3 corners[4] = {
-        add(agent.position, add(multiply(tangent, -halfSize), multiply(bitangent, halfSize))),
-        add(agent.position, add(multiply(tangent, halfSize), multiply(bitangent, halfSize))),
-        add(agent.position, add(multiply(tangent, halfSize), multiply(bitangent, -halfSize))),
-        add(agent.position, add(multiply(tangent, -halfSize), multiply(bitangent, -halfSize)))};
+      add(agent.position, add(multiply(tangent, -halfSize), multiply(bitangent, halfSize))),
+      add(agent.position, add(multiply(tangent, halfSize), multiply(bitangent, halfSize))),
+      add(agent.position, add(multiply(tangent, halfSize), multiply(bitangent, -halfSize))),
+      add(agent.position, add(multiply(tangent, -halfSize), multiply(bitangent, -halfSize)))
+    };
     Vec2 points[4];
     for (int i = 0; i < 4; ++i) {
       normalize(corners[i]);
       const Vec3 rotated = rotateView(corners[i]);
       const float cornerScale = fov / (rotated.z + kCameraZ);
-      points[i] = {centerX + rotated.x * cornerScale,
-                   centerY + rotated.y * cornerScale};
+      points[i] = { centerX + rotated.x * cornerScale,
+                    centerY + rotated.y * cornerScale };
     }
     canvas.fillTriangle(points[0].x, points[0].y, points[1].x, points[1].y,
                         points[2].x, points[2].y, ballColor);
@@ -417,11 +419,27 @@ void drawScene() {
   canvas.pushSprite(0, 0);
 }
 
+void reportFps() {
+  static uint32_t frameCount = 0;
+  static uint32_t previousReportMs = millis();
+  ++frameCount;
+
+  const uint32_t now = millis();
+  const uint32_t elapsedMs = now - previousReportMs;
+  if (elapsedMs >= 1000) {
+    const float fps = frameCount * 1000.0f / elapsedMs;
+    Serial.printf("FPS: %.1f | agents: %d\n", fps, kAgentCount);
+    frameCount = 0;
+    previousReportMs = now;
+  }
+}
+
 }  // namespace
 
 void setup() {
   auto config = M5.config();
   M5.begin(config);
+  Serial.begin(115200);
   M5.Display.setBrightness(115);
   screenWidth = M5.Display.width();
   screenHeight = M5.Display.height();
@@ -449,5 +467,6 @@ void loop() {
   updateTouchRotation();
   updateAgents();
   drawScene();
+  reportFps();
   M5.delay(1);
 }
