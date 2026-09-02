@@ -20,6 +20,10 @@ namespace {
 constexpr int kGridSize = 8;
 constexpr int kAgentPairs = 4;
 constexpr int kAgentCount = kAgentPairs * 2;
+constexpr int kVertexCount = 6 * (kGridSize + 1) * (kGridSize + 1);
+constexpr int kQuadCount = 6 * kGridSize * kGridSize;
+constexpr int kCanvasSize = 336;
+constexpr float kCanvasScaleReference = 336.0f;
 constexpr float kBallSpeed = 0.085f;
 constexpr float kBallSize = 0.12f;
 constexpr float kReflectionRandomness = 0.15f;
@@ -60,10 +64,15 @@ std::vector<Vec3> rotatedVertices;
 std::vector<Vec2> projectedVertices;
 std::vector<Quad> quads;
 std::vector<uint16_t> quadOrder;
+std::vector<std::array<Vec2, 4>> visibleFrontNeon;
 std::array<Agent, kAgentCount> agents;
 
 int16_t screenWidth = 0;
 int16_t screenHeight = 0;
+int16_t canvasWidth = 0;
+int16_t canvasHeight = 0;
+int16_t canvasOffsetX = 0;
+int16_t canvasOffsetY = 0;
 float centerX = 0;
 float centerY = 0;
 float sphereRadius = 0;
@@ -166,6 +175,8 @@ bool pointInTriangle(const Vec2& p, const Vec2& a, const Vec2& b,
 void createQuadSphere() {
   vertices.clear();
   quads.clear();
+  vertices.reserve(kVertexCount);
+  quads.reserve(kQuadCount);
   const Vec3 normals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
   const Vec3 tangents[6] = { { 0, 1, 0 }, { 0, 1, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 } };
   int vertexOffset = 0;
@@ -204,6 +215,7 @@ void createQuadSphere() {
   rotatedVertices.resize(vertices.size());
   projectedVertices.resize(vertices.size());
   quadOrder.resize(quads.size());
+  visibleFrontNeon.reserve(quads.size() / 2);
 }
 
 int findClosestQuad(const Vec3& position) {
@@ -343,8 +355,7 @@ void drawScene() {
     return quads[a].depth > quads[b].depth;
   });
 
-  std::vector<std::array<Vec2, 4>> visibleFrontNeon;
-  visibleFrontNeon.reserve(quads.size() / 2);
+  visibleFrontNeon.clear();
   for (uint16_t index : quadOrder) {
     const Quad& quad = quads[index];
     if (quad.team == kTeamTransparent) continue;
@@ -425,7 +436,7 @@ void drawScene() {
     canvas.fillTriangle(points[0].x, points[0].y, points[2].x, points[2].y,
                         points[3].x, points[3].y, ballColor);
   }
-  canvas.pushSprite(0, 0);
+  canvas.pushSprite(canvasOffsetX, canvasOffsetY);
 }
 
 void reportFps() {
@@ -448,24 +459,31 @@ void reportFps() {
 void setup() {
   auto config = M5.config();
   M5.begin(config);
-  Serial.begin(115200);
+  // Serial.begin(115200);  // Enable together with reportFps() for profiling.
   M5.Display.setBrightness(100);
   screenWidth = M5.Display.width();
   screenHeight = M5.Display.height();
-  centerX = screenWidth * 0.5f;
-  centerY = screenHeight * 0.5f;
-  sphereRadius = std::min(screenWidth, screenHeight) * 0.485f;
+  canvasWidth = std::min<int16_t>(kCanvasSize, screenWidth);
+  canvasHeight = std::min<int16_t>(kCanvasSize, screenHeight);
+  canvasOffsetX = (screenWidth - canvasWidth) / 2;
+  canvasOffsetY = (screenHeight - canvasHeight) / 2;
+  centerX = canvasWidth * 0.5f;
+  centerY = canvasHeight * 0.5f;
+  const float canvasScale = canvasWidth / kCanvasScaleReference;
+  sphereRadius = std::min(screenWidth, screenHeight) * 0.485f * canvasScale;
   fov = sphereRadius * 2.0f;
+  createQuadSphere();
+  M5.Display.fillScreen(TFT_BLACK);
   canvas.setColorDepth(16);
   canvas.setPsram(true);
-  if (!canvas.createSprite(screenWidth, screenHeight)) {
+  if (!canvas.createSprite(canvasWidth, canvasHeight)) {
     M5.Display.fillScreen(TFT_BLACK);
     M5.Display.setTextColor(TFT_RED);
     M5.Display.setTextDatum(middle_center);
-    M5.Display.drawString("Canvas allocation failed", centerX, centerY);
+    M5.Display.drawString("Canvas allocation failed", screenWidth * 0.5f,
+                          screenHeight * 0.5f);
     while (true) M5.delay(1000);
   }
-  createQuadSphere();
   resetGame();
 }
 
@@ -476,6 +494,6 @@ void loop() {
   updateTouchRotation();
   updateAgents();
   drawScene();
-  reportFps();
+  // reportFps();  // Enable together with Serial.begin() for profiling.
   M5.delay(1);
 }
