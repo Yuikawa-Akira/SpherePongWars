@@ -13,7 +13,6 @@ M5Stack StopWatch.
 - A button: Start a new game
 - B button: Change the neon color
 - Touch drag: Change the sphere's rotation direction and speed
-- Rotate the device: Rotate the sphere using the gyroscope
 
 ## 日本語
 
@@ -25,7 +24,6 @@ Sphere Pong Warsは、M5Stack StopWatch向けのリアルタイム・ジェネ�
 - Aボタン：新しいゲームを開始
 - Bボタン：ネオンカラーを変更
 - タッチドラッグ：球体の回転方向と速度を変更
-- 本体を回す：ジャイロで球体を回転
 
 ## Credits
 This software includes code and logic derived from:  
