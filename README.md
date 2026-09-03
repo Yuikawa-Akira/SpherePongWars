@@ -1,5 +1,8 @@
 # Sphere Pong Wars for M5Stack StopWatch
 
+## Demo
+![SpherePongWars.gif](https://github.com/Yuikawa-Akira/SpherePongWars/blob/main/SpherePongWars.gif)
+
 ## English
 
 Sphere Pong Wars is a real-time generative territory simulation for the
