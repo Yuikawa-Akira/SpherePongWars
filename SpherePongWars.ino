@@ -58,6 +58,19 @@ struct Agent {
   int16_t currentQuad = -1;
 };
 
+constexpr Vec3 kFaceNormals[6] = {
+  { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
+  { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 }
+};
+constexpr Vec3 kFaceTangents[6] = {
+  { 0, 1, 0 }, { 0, 1, 0 }, { 1, 0, 0 },
+  { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }
+};
+constexpr Vec3 kFaceBitangents[6] = {
+  { 0, 0, 1 }, { 0, 0, -1 }, { 0, 0, -1 },
+  { 0, 0, 1 }, { 0, 1, 0 }, { 0, -1, 0 }
+};
+
 M5Canvas canvas(&M5.Display);
 std::vector<Vec3> vertices;
 std::vector<Vec3> rotatedVertices;
@@ -177,17 +190,15 @@ void createQuadSphere() {
   quads.clear();
   vertices.reserve(kVertexCount);
   quads.reserve(kQuadCount);
-  const Vec3 normals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
-  const Vec3 tangents[6] = { { 0, 1, 0 }, { 0, 1, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 } };
   int vertexOffset = 0;
   for (int face = 0; face < 6; ++face) {
-    const Vec3 bitangent = cross(normals[face], tangents[face]);
+    const Vec3& bitangent = kFaceBitangents[face];
     for (int y = 0; y <= kGridSize; ++y) {
       for (int x = 0; x <= kGridSize; ++x) {
         const float u = x / static_cast<float>(kGridSize) * 2.0f - 1.0f;
         const float v = y / static_cast<float>(kGridSize) * 2.0f - 1.0f;
-        Vec3 point = add(normals[face],
-                         add(multiply(tangents[face], u),
+        Vec3 point = add(kFaceNormals[face],
+                         add(multiply(kFaceTangents[face], u),
                              multiply(bitangent, v)));
         normalize(point);
         vertices.push_back(point);
@@ -219,17 +230,30 @@ void createQuadSphere() {
 }
 
 int findClosestQuad(const Vec3& position) {
-  float nearestDistance = 1e9f;
-  int nearest = -1;
-  for (size_t i = 0; i < quads.size(); ++i) {
-    const Vec3 difference = subtract(position, quads[i].center);
-    const float distance = dot(difference, difference);
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearest = i;
-    }
+  const float absX = fabsf(position.x);
+  const float absY = fabsf(position.y);
+  const float absZ = fabsf(position.z);
+
+  int face;
+  if (absX >= absY && absX >= absZ) {
+    face = position.x >= 0.0f ? 0 : 1;
+  } else if (absY >= absZ) {
+    face = position.y >= 0.0f ? 2 : 3;
+  } else {
+    face = position.z >= 0.0f ? 4 : 5;
   }
-  return nearest;
+
+  const float normalDistance = dot(position, kFaceNormals[face]);
+  if (normalDistance <= 0.0f) return -1;
+  const float u = dot(position, kFaceTangents[face]) / normalDistance;
+  const float v = dot(position, kFaceBitangents[face]) / normalDistance;
+  const int x = std::max(0, std::min(
+      kGridSize - 1,
+      static_cast<int>((u + 1.0f) * 0.5f * kGridSize)));
+  const int y = std::max(0, std::min(
+      kGridSize - 1,
+      static_cast<int>((v + 1.0f) * 0.5f * kGridSize)));
+  return face * kGridSize * kGridSize + y * kGridSize + x;
 }
 
 void resetGame() {
@@ -348,7 +372,12 @@ void drawScene() {
                              centerY + rotatedVertices[i].y * scale };
   }
   for (size_t i = 0; i < quads.size(); ++i) {
-    quads[i].depth = rotateView(quads[i].center).z;
+    Quad& quad = quads[i];
+    quad.depth =
+        (rotatedVertices[quad.vertex[0]].z +
+         rotatedVertices[quad.vertex[1]].z +
+         rotatedVertices[quad.vertex[2]].z +
+         rotatedVertices[quad.vertex[3]].z) * 0.25f;
     quadOrder[i] = i;
   }
   std::sort(quadOrder.begin(), quadOrder.end(), [](uint16_t a, uint16_t b) {
@@ -475,7 +504,7 @@ void setup() {
   createQuadSphere();
   M5.Display.fillScreen(TFT_BLACK);
   canvas.setColorDepth(16);
-  canvas.setPsram(true);
+  canvas.setPsram(false);
   if (!canvas.createSprite(canvasWidth, canvasHeight)) {
     M5.Display.fillScreen(TFT_BLACK);
     M5.Display.setTextColor(TFT_RED);
