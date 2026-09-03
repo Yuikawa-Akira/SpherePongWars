@@ -113,12 +113,15 @@ float touchRotationY = 0;
 float touchVelocityX = 0;
 float touchVelocityY = 0;
 uint32_t touchReleasedMs = 0;
-float viewSinX = 0;
-float viewCosX = 1;
-float viewSinY = 0;
-float viewCosY = 1;
-float viewSinZ = 0;
-float viewCosZ = 1;
+float viewM00 = 1;
+float viewM01 = 0;
+float viewM02 = 0;
+float viewM10 = 0;
+float viewM11 = 1;
+float viewM12 = 0;
+float viewM20 = 0;
+float viewM21 = 0;
+float viewM22 = 1;
 uint8_t colorIndex = 0;
 uint32_t rngState = 1;
 float filteredAccelX = 0;
@@ -126,6 +129,7 @@ float filteredAccelY = 0;
 float filteredAccelZ = 1;
 float frameDeltaSeconds = 1.0f / 30.0f;
 bool levelInitialized = false;
+bool displayUpright = false;
 uint32_t previousImuMs = 0;
 uint32_t vibrationStopMs = 0;
 
@@ -198,22 +202,49 @@ Vec3 multiply(const Vec3& value, float scale) {
 }
 
 void updateViewRotationCache() {
-  viewSinX = sinf(rotationX);
-  viewCosX = cosf(rotationX);
-  viewSinY = sinf(rotationY);
-  viewCosY = cosf(rotationY);
-  viewSinZ = sinf(rotationZ);
-  viewCosZ = cosf(rotationZ);
+  const float sinAuto = sinf(autoRotationY);
+  const float cosAuto = cosf(autoRotationY);
+  const float sinLevel = sinf(rotationZ);
+  const float cosLevel = cosf(rotationZ);
+  const float sinTouchX = sinf(rotationX);
+  const float cosTouchX = cosf(rotationX);
+  const float sinTouchY = sinf(rotationY);
+  const float cosTouchY = cosf(rotationY);
+
+  // Compose: touch Y * touch X * level Z * automatic spin Y.
+  // Touch rotations are applied last, so their axes always match the screen.
+  const float z00 = cosLevel * cosAuto;
+  const float z01 = -sinLevel;
+  const float z02 = -cosLevel * sinAuto;
+  const float z10 = sinLevel * cosAuto;
+  const float z11 = cosLevel;
+  const float z12 = -sinLevel * sinAuto;
+  const float z20 = sinAuto;
+  const float z21 = 0;
+  const float z22 = cosAuto;
+
+  const float x10 = cosTouchX * z10 - sinTouchX * z20;
+  const float x11 = cosTouchX * z11 - sinTouchX * z21;
+  const float x12 = cosTouchX * z12 - sinTouchX * z22;
+  const float x20 = sinTouchX * z10 + cosTouchX * z20;
+  const float x21 = sinTouchX * z11 + cosTouchX * z21;
+  const float x22 = sinTouchX * z12 + cosTouchX * z22;
+
+  viewM00 = cosTouchY * z00 - sinTouchY * x20;
+  viewM01 = cosTouchY * z01 - sinTouchY * x21;
+  viewM02 = cosTouchY * z02 - sinTouchY * x22;
+  viewM10 = x10;
+  viewM11 = x11;
+  viewM12 = x12;
+  viewM20 = sinTouchY * z00 + cosTouchY * x20;
+  viewM21 = sinTouchY * z01 + cosTouchY * x21;
+  viewM22 = sinTouchY * z02 + cosTouchY * x22;
 }
 
 Vec3 rotateView(const Vec3& source) {
-  const float y1 = source.y * viewCosX - source.z * viewSinX;
-  const float z1 = source.y * viewSinX + source.z * viewCosX;
-  const float x2 = source.x * viewCosY - z1 * viewSinY;
-  const float z2 = source.x * viewSinY + z1 * viewCosY;
-  return { x2 * viewCosZ - y1 * viewSinZ,
-           x2 * viewSinZ + y1 * viewCosZ,
-           z2 };
+  return { source.x * viewM00 + source.y * viewM01 + source.z * viewM02,
+           source.x * viewM10 + source.y * viewM11 + source.z * viewM12,
+           source.x * viewM20 + source.y * viewM21 + source.z * viewM22 };
 }
 
 uint32_t darken(uint32_t color, float amount) {
@@ -315,7 +346,7 @@ void resetGame() {
   touchVelocityX = 0;
   touchVelocityY = 0;
   rotationX = 0;
-  rotationY = autoRotationY;
+  rotationY = 0;
   rotationZ = levelRotationZ;
   updateViewRotationCache();
   for (size_t i = 0; i < quads.size(); ++i) {
@@ -391,6 +422,11 @@ void updateImu() {
   const float gravityScreenY = -filteredAccelX;
   const float inPlaneGravity = sqrtf(
       gravityScreenX * gravityScreenX + gravityScreenY * gravityScreenY);
+  if (inPlaneGravity >= kUprightFullG) {
+    displayUpright = true;
+  } else if (inPlaneGravity <= kUprightBeginG) {
+    displayUpright = false;
+  }
   float uprightBlend = (inPlaneGravity - kUprightBeginG) /
                        (kUprightFullG - kUprightBeginG);
   uprightBlend = std::max(0.0f, std::min(1.0f, uprightBlend));
@@ -441,6 +477,7 @@ void updateAgents() {
 
 void updateTouchRotation() {
   static bool touching = false;
+  static bool touchStartedUpright = false;
   static int16_t previousX = 0;
   static int16_t previousY = 0;
   const bool wasTouching = touching;
@@ -448,12 +485,18 @@ void updateTouchRotation() {
     const auto detail = M5.Touch.getDetail(0);
     if (detail.isPressed() || detail.wasPressed()) {
       if (touching) {
-        const float deltaX = (detail.y - previousY) * kTouchRadiansPerPixel;
-        const float deltaY = (detail.x - previousX) * kTouchRadiansPerPixel;
+        const float dragRight = detail.x - previousX;
+        const float dragUp = previousY - detail.y;
+        const float verticalDirection = touchStartedUpright ? 1.0f : -1.0f;
+        const float deltaX =
+            dragUp * verticalDirection * kTouchRadiansPerPixel;
+        const float deltaY = dragRight * kTouchRadiansPerPixel;
         touchRotationX += deltaX;
         touchRotationY += deltaY;
         touchVelocityX = deltaX / frameDeltaSeconds;
         touchVelocityY = deltaY / frameDeltaSeconds;
+      } else {
+        touchStartedUpright = displayUpright;
       }
       previousX = detail.x;
       previousY = detail.y;
@@ -489,7 +532,7 @@ void updateTouchRotation() {
   autoRotationY += kAutoSpinRadiansPerSecond * frameDeltaSeconds;
   if (autoRotationY > kTau) autoRotationY -= kTau;
   rotationX = touchRotationX;
-  rotationY = autoRotationY + touchRotationY;
+  rotationY = touchRotationY;
   rotationZ = levelRotationZ;
   updateViewRotationCache();
 }
@@ -658,11 +701,11 @@ void loop() {
   updateHaptic();
   if (M5.BtnA.wasClicked()) {
     resetGame();
-    triggerHaptic(180, 30);
+    triggerHaptic(180, 50);
   }
   if (M5.BtnB.wasClicked()) {
     colorIndex = (colorIndex + 1) % 6;
-    triggerHaptic(180, 30);
+    triggerHaptic(180, 50);
   }
   updateImu();
   updateTouchRotation();
