@@ -56,6 +56,13 @@ struct Vec3 {
   float z = 0;
 };
 
+struct Quaternion {
+  float w = 1;
+  float x = 0;
+  float y = 0;
+  float z = 0;
+};
+
 struct Quad {
   uint16_t vertex[4] = {};
   uint8_t team = 0;
@@ -102,16 +109,13 @@ float centerX = 0;
 float centerY = 0;
 float sphereRadius = 0;
 float fov = 0;
-float rotationX = 0;
-float rotationY = 0;
-float rotationZ = 0;
 float autoRotationY = 0;
 float levelRotationZ = 0;
 float levelAngularVelocityZ = 0;
-float touchRotationX = 0;
-float touchRotationY = 0;
+Quaternion touchOrientation;
 float touchVelocityX = 0;
 float touchVelocityY = 0;
+float touchVelocityZ = 0;
 uint32_t touchReleasedMs = 0;
 float viewM00 = 1;
 float viewM01 = 0;
@@ -129,7 +133,6 @@ float filteredAccelY = 0;
 float filteredAccelZ = 1;
 float frameDeltaSeconds = 1.0f / 30.0f;
 bool levelInitialized = false;
-bool displayUpright = false;
 uint32_t previousImuMs = 0;
 uint32_t vibrationStopMs = 0;
 
@@ -201,44 +204,85 @@ Vec3 multiply(const Vec3& value, float scale) {
   return { value.x * scale, value.y * scale, value.z * scale };
 }
 
+void normalize(Quaternion& value) {
+  const float magnitude = sqrtf(value.w * value.w + value.x * value.x +
+                                value.y * value.y + value.z * value.z);
+  if (magnitude <= 0.000001f) {
+    value = {};
+    return;
+  }
+  value.w /= magnitude;
+  value.x /= magnitude;
+  value.y /= magnitude;
+  value.z /= magnitude;
+}
+
+Quaternion quaternionMultiply(const Quaternion& a, const Quaternion& b) {
+  return { a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+           a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+           a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+           a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w };
+}
+
+void applyScreenTouchRotation(float angleX, float angleY, float angleZ) {
+  const float angle = sqrtf(angleX * angleX + angleY * angleY +
+                            angleZ * angleZ);
+  if (angle <= 0.000001f) return;
+  const float halfAngle = angle * 0.5f;
+  const float scale = sinf(halfAngle) / angle;
+  const Quaternion delta = { cosf(halfAngle), angleX * scale,
+                             angleY * scale, angleZ * scale };
+  // Left multiplication makes every incremental rotation screen-relative.
+  touchOrientation = quaternionMultiply(delta, touchOrientation);
+  normalize(touchOrientation);
+}
+
 void updateViewRotationCache() {
   const float sinAuto = sinf(autoRotationY);
   const float cosAuto = cosf(autoRotationY);
-  const float sinLevel = sinf(rotationZ);
-  const float cosLevel = cosf(rotationZ);
-  const float sinTouchX = sinf(rotationX);
-  const float cosTouchX = cosf(rotationX);
-  const float sinTouchY = sinf(rotationY);
-  const float cosTouchY = cosf(rotationY);
+  const float sinLevel = sinf(levelRotationZ);
+  const float cosLevel = cosf(levelRotationZ);
 
-  // Compose: touch Y * touch X * level Z * automatic spin Y.
-  // Touch rotations are applied last, so their axes always match the screen.
-  const float z00 = cosLevel * cosAuto;
-  const float z01 = -sinLevel;
-  const float z02 = -cosLevel * sinAuto;
-  const float z10 = sinLevel * cosAuto;
-  const float z11 = cosLevel;
-  const float z12 = -sinLevel * sinAuto;
-  const float z20 = sinAuto;
-  const float z21 = 0;
-  const float z22 = cosAuto;
+  // Base pose: gradual gravity leveling after automatic spin.
+  const float b00 = cosLevel * cosAuto;
+  const float b01 = -sinLevel;
+  const float b02 = -cosLevel * sinAuto;
+  const float b10 = sinLevel * cosAuto;
+  const float b11 = cosLevel;
+  const float b12 = -sinLevel * sinAuto;
+  const float b20 = sinAuto;
+  const float b21 = 0;
+  const float b22 = cosAuto;
 
-  const float x10 = cosTouchX * z10 - sinTouchX * z20;
-  const float x11 = cosTouchX * z11 - sinTouchX * z21;
-  const float x12 = cosTouchX * z12 - sinTouchX * z22;
-  const float x20 = sinTouchX * z10 + cosTouchX * z20;
-  const float x21 = sinTouchX * z11 + cosTouchX * z21;
-  const float x22 = sinTouchX * z12 + cosTouchX * z22;
+  // Touch pose is independent and is always applied in screen space.
+  const float xx = touchOrientation.x * touchOrientation.x;
+  const float yy = touchOrientation.y * touchOrientation.y;
+  const float zz = touchOrientation.z * touchOrientation.z;
+  const float xy = touchOrientation.x * touchOrientation.y;
+  const float xz = touchOrientation.x * touchOrientation.z;
+  const float yz = touchOrientation.y * touchOrientation.z;
+  const float wx = touchOrientation.w * touchOrientation.x;
+  const float wy = touchOrientation.w * touchOrientation.y;
+  const float wz = touchOrientation.w * touchOrientation.z;
+  const float t00 = 1.0f - 2.0f * (yy + zz);
+  const float t01 = 2.0f * (xy - wz);
+  const float t02 = 2.0f * (xz + wy);
+  const float t10 = 2.0f * (xy + wz);
+  const float t11 = 1.0f - 2.0f * (xx + zz);
+  const float t12 = 2.0f * (yz - wx);
+  const float t20 = 2.0f * (xz - wy);
+  const float t21 = 2.0f * (yz + wx);
+  const float t22 = 1.0f - 2.0f * (xx + yy);
 
-  viewM00 = cosTouchY * z00 - sinTouchY * x20;
-  viewM01 = cosTouchY * z01 - sinTouchY * x21;
-  viewM02 = cosTouchY * z02 - sinTouchY * x22;
-  viewM10 = x10;
-  viewM11 = x11;
-  viewM12 = x12;
-  viewM20 = sinTouchY * z00 + cosTouchY * x20;
-  viewM21 = sinTouchY * z01 + cosTouchY * x21;
-  viewM22 = sinTouchY * z02 + cosTouchY * x22;
+  viewM00 = t00 * b00 + t01 * b10 + t02 * b20;
+  viewM01 = t00 * b01 + t01 * b11 + t02 * b21;
+  viewM02 = t00 * b02 + t01 * b12 + t02 * b22;
+  viewM10 = t10 * b00 + t11 * b10 + t12 * b20;
+  viewM11 = t10 * b01 + t11 * b11 + t12 * b21;
+  viewM12 = t10 * b02 + t11 * b12 + t12 * b22;
+  viewM20 = t20 * b00 + t21 * b10 + t22 * b20;
+  viewM21 = t20 * b01 + t21 * b11 + t22 * b21;
+  viewM22 = t20 * b02 + t21 * b12 + t22 * b22;
 }
 
 Vec3 rotateView(const Vec3& source) {
@@ -341,13 +385,10 @@ void resetGame() {
   rngState = esp_random();
   if (!rngState) rngState = millis() | 1;
   autoRotationY = randomFloat(0.0f, kTau);
-  touchRotationX = 0;
-  touchRotationY = 0;
+  touchOrientation = {};
   touchVelocityX = 0;
   touchVelocityY = 0;
-  rotationX = 0;
-  rotationY = 0;
-  rotationZ = levelRotationZ;
+  touchVelocityZ = 0;
   updateViewRotationCache();
   for (size_t i = 0; i < quads.size(); ++i) {
     const int face = i / (kGridSize * kGridSize);
@@ -422,11 +463,6 @@ void updateImu() {
   const float gravityScreenY = -filteredAccelX;
   const float inPlaneGravity = sqrtf(
       gravityScreenX * gravityScreenX + gravityScreenY * gravityScreenY);
-  if (inPlaneGravity >= kUprightFullG) {
-    displayUpright = true;
-  } else if (inPlaneGravity <= kUprightBeginG) {
-    displayUpright = false;
-  }
   float uprightBlend = (inPlaneGravity - kUprightBeginG) /
                        (kUprightFullG - kUprightBeginG);
   uprightBlend = std::max(0.0f, std::min(1.0f, uprightBlend));
@@ -477,7 +513,6 @@ void updateAgents() {
 
 void updateTouchRotation() {
   static bool touching = false;
-  static bool touchStartedUpright = false;
   static int16_t previousX = 0;
   static int16_t previousY = 0;
   const bool wasTouching = touching;
@@ -486,17 +521,17 @@ void updateTouchRotation() {
     if (detail.isPressed() || detail.wasPressed()) {
       if (touching) {
         const float dragRight = detail.x - previousX;
-        const float dragUp = previousY - detail.y;
-        const float verticalDirection = touchStartedUpright ? 1.0f : -1.0f;
-        const float deltaX =
-            dragUp * verticalDirection * kTouchRadiansPerPixel;
-        const float deltaY = dragRight * kTouchRadiansPerPixel;
-        touchRotationX += deltaX;
-        touchRotationY += deltaY;
+        const float dragDown = detail.y - previousY;
+        const float deltaX = dragDown * kTouchRadiansPerPixel;
+        const float deltaY = -dragRight * kTouchRadiansPerPixel;
+        applyScreenTouchRotation(deltaX, deltaY, 0);
         touchVelocityX = deltaX / frameDeltaSeconds;
         touchVelocityY = deltaY / frameDeltaSeconds;
+        touchVelocityZ = 0;
       } else {
-        touchStartedUpright = displayUpright;
+        touchVelocityX = 0;
+        touchVelocityY = 0;
+        touchVelocityZ = 0;
       }
       previousX = detail.x;
       previousY = detail.y;
@@ -509,31 +544,41 @@ void updateTouchRotation() {
   if (wasTouching && !touching) touchReleasedMs = millis();
 
   if (!touching) {
-    touchRotationX += touchVelocityX * frameDeltaSeconds;
-    touchRotationY += touchVelocityY * frameDeltaSeconds;
     const bool returning = millis() - touchReleasedMs >= kTouchReturnDelayMs;
     const float damping = returning ? kTouchReturnDampingPerSecond
                                     : kTouchCoastDampingPerSecond;
     if (returning) {
-      // Equivalent full turns can be discarded without a visible jump.
-      touchRotationX = atan2f(sinf(touchRotationX), cosf(touchRotationX));
-      touchRotationY = atan2f(sinf(touchRotationY), cosf(touchRotationY));
-      touchVelocityX -=
-          touchRotationX * kTouchReturnSpringPerSecond2 * frameDeltaSeconds;
-      touchVelocityY -=
-          touchRotationY * kTouchReturnSpringPerSecond2 * frameDeltaSeconds;
+      Quaternion shortest = touchOrientation;
+      if (shortest.w < 0) {
+        shortest.w = -shortest.w;
+        shortest.x = -shortest.x;
+        shortest.y = -shortest.y;
+        shortest.z = -shortest.z;
+      }
+      const float sinHalf = sqrtf(shortest.x * shortest.x +
+                                  shortest.y * shortest.y +
+                                  shortest.z * shortest.z);
+      if (sinHalf > 0.000001f) {
+        const float angle = 2.0f * atan2f(sinHalf, shortest.w);
+        const float spring = kTouchReturnSpringPerSecond2 *
+                             frameDeltaSeconds * angle / sinHalf;
+        touchVelocityX -= shortest.x * spring;
+        touchVelocityY -= shortest.y * spring;
+        touchVelocityZ -= shortest.z * spring;
+      }
     }
     const float velocityDecay = std::max(
         0.0f, 1.0f - damping * frameDeltaSeconds);
     touchVelocityX *= velocityDecay;
     touchVelocityY *= velocityDecay;
+    touchVelocityZ *= velocityDecay;
+    applyScreenTouchRotation(touchVelocityX * frameDeltaSeconds,
+                             touchVelocityY * frameDeltaSeconds,
+                             touchVelocityZ * frameDeltaSeconds);
   }
 
   autoRotationY += kAutoSpinRadiansPerSecond * frameDeltaSeconds;
   if (autoRotationY > kTau) autoRotationY -= kTau;
-  rotationX = touchRotationX;
-  rotationY = touchRotationY;
-  rotationZ = levelRotationZ;
   updateViewRotationCache();
 }
 
