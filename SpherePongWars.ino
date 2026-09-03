@@ -30,6 +30,17 @@ constexpr float kReflectionRandomness = 0.15f;
 constexpr float kCameraZ = 3.0f;
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kTau = kPi * 2.0f;
+constexpr float kDegreesToRadians = kPi / 180.0f;
+constexpr float kAutoSpinRadiansPerSecond = 0.55f;
+constexpr float kGravityFilter = 0.12f;
+constexpr float kLevelGyroResponse = 0.45f;
+constexpr float kLevelCorrectionPerSecond = 1.0f;
+constexpr float kMaxLevelRateRadiansPerSecond = 0.42f;
+constexpr float kTouchRadiansPerPixel = 0.0055f;
+constexpr float kTouchCoastDampingPerSecond = 0.55f;
+constexpr float kTouchReturnDampingPerSecond = 1.1f;
+constexpr float kTouchReturnSpringPerSecond2 = 0.55f;
+constexpr uint32_t kTouchReturnDelayMs = 1000;
 constexpr uint8_t kTeamNeon = 0;
 constexpr uint8_t kTeamTransparent = 1;
 
@@ -92,14 +103,27 @@ float sphereRadius = 0;
 float fov = 0;
 float rotationX = 0;
 float rotationY = 0;
-float spinX = 0;
-float spinY = 0.015f;
+float autoRotationY = 0;
+float levelRotationX = 0;
+float levelRotationY = 0;
+float touchRotationX = 0;
+float touchRotationY = 0;
+float touchVelocityX = 0;
+float touchVelocityY = 0;
+uint32_t touchReleasedMs = 0;
 float viewSinX = 0;
 float viewCosX = 1;
 float viewSinY = 0;
 float viewCosY = 1;
 uint8_t colorIndex = 0;
 uint32_t rngState = 1;
+float filteredAccelX = 0;
+float filteredAccelY = 0;
+float filteredAccelZ = 1;
+float frameDeltaSeconds = 1.0f / 30.0f;
+bool levelInitialized = false;
+uint32_t previousImuMs = 0;
+uint32_t vibrationStopMs = 0;
 
 constexpr uint32_t kNeonColors[6] = {
   0x00FF9D, 0x00E5FF, 0xFF2ED1, 0xFFD60A, 0x9DFF00, 0xFF5A36
@@ -117,6 +141,24 @@ uint32_t nextRandom() {
 float randomFloat(float low, float high) {
   const float unit = (nextRandom() & 0x00FFFFFFu) / 16777215.0f;
   return low + (high - low) * unit;
+}
+
+bool deadlineReached(uint32_t now, uint32_t deadline) {
+  return static_cast<int32_t>(now - deadline) >= 0;
+}
+
+void triggerHaptic(uint8_t level, uint16_t durationMs) {
+  const uint32_t now = millis();
+  M5.Power.setVibration(level);
+  vibrationStopMs = now + durationMs;
+}
+
+void updateHaptic() {
+  const uint32_t now = millis();
+  if (vibrationStopMs && deadlineReached(now, vibrationStopMs)) {
+    M5.Power.setVibration(0);
+    vibrationStopMs = 0;
+  }
 }
 
 float dot(const Vec3& a, const Vec3& b) {
@@ -259,11 +301,14 @@ int findClosestQuad(const Vec3& position) {
 void resetGame() {
   rngState = esp_random();
   if (!rngState) rngState = millis() | 1;
-  rotationX = randomFloat(-0.20f, 0.20f);
-  rotationY = randomFloat(0.0f, kTau);
+  autoRotationY = randomFloat(0.0f, kTau);
+  touchRotationX = 0;
+  touchRotationY = 0;
+  touchVelocityX = 0;
+  touchVelocityY = 0;
+  rotationX = -levelRotationX;
+  rotationY = autoRotationY - levelRotationY;
   updateViewRotationCache();
-  spinX = 0;
-  spinY = 0.015f;
   for (size_t i = 0; i < quads.size(); ++i) {
     const int face = i / (kGridSize * kGridSize);
     quads[i].team = face < 3 ? kTeamNeon : kTeamTransparent;
@@ -305,6 +350,88 @@ void resetGame() {
   }
 }
 
+float angleDifference(float target, float current) {
+  return atan2f(sinf(target - current), cosf(target - current));
+}
+
+void limitLevelChange(float previousLevelX, float previousLevelY) {
+  const float maxLevelStep =
+      kMaxLevelRateRadiansPerSecond * frameDeltaSeconds;
+  const float levelStepX = std::max(
+      -maxLevelStep,
+      std::min(maxLevelStep,
+               angleDifference(levelRotationX, previousLevelX)));
+  const float levelStepY = std::max(
+      -maxLevelStep,
+      std::min(maxLevelStep,
+               angleDifference(levelRotationY, previousLevelY)));
+  levelRotationX = previousLevelX + levelStepX;
+  levelRotationY = previousLevelY + levelStepY;
+}
+
+void updateImu() {
+  const uint32_t now = millis();
+  frameDeltaSeconds = (now - previousImuMs) * 0.001f;
+  previousImuMs = now;
+  frameDeltaSeconds = std::max(0.001f, std::min(0.05f, frameDeltaSeconds));
+  if (!M5.Imu.isEnabled()) return;
+  const float previousLevelX = levelRotationX;
+  const float previousLevelY = levelRotationY;
+
+  float gyroX = 0;
+  float gyroY = 0;
+  float gyroZ = 0;
+  if (M5.Imu.getGyro(&gyroX, &gyroY, &gyroZ)) {
+    levelRotationX += gyroX * kDegreesToRadians * frameDeltaSeconds *
+                      kLevelGyroResponse;
+    levelRotationY += gyroY * kDegreesToRadians * frameDeltaSeconds *
+                      kLevelGyroResponse;
+  }
+
+  float accelX = 0;
+  float accelY = 0;
+  float accelZ = 0;
+  if (!M5.Imu.getAccel(&accelX, &accelY, &accelZ)) {
+    limitLevelChange(previousLevelX, previousLevelY);
+    return;
+  }
+  const bool firstLevelSample = !levelInitialized;
+  if (firstLevelSample) {
+    filteredAccelX = accelX;
+    filteredAccelY = accelY;
+    filteredAccelZ = accelZ;
+    levelInitialized = true;
+  } else {
+    filteredAccelX += (accelX - filteredAccelX) * kGravityFilter;
+    filteredAccelY += (accelY - filteredAccelY) * kGravityFilter;
+    filteredAccelZ += (accelZ - filteredAccelZ) * kGravityFilter;
+  }
+
+  const float gravityMagnitude = sqrtf(
+      filteredAccelX * filteredAccelX + filteredAccelY * filteredAccelY +
+      filteredAccelZ * filteredAccelZ);
+  if (gravityMagnitude < 0.55f || gravityMagnitude > 1.45f) {
+    limitLevelChange(previousLevelX, previousLevelY);
+    return;
+  }
+
+  const float accelLevelX = atan2f(filteredAccelY, filteredAccelZ);
+  const float accelLevelY = atan2f(
+      -filteredAccelX,
+      sqrtf(filteredAccelY * filteredAccelY +
+            filteredAccelZ * filteredAccelZ));
+  if (firstLevelSample) {
+    levelRotationX = accelLevelX;
+    levelRotationY = accelLevelY;
+    return;
+  }
+  const float correction = std::min(
+      1.0f, kLevelCorrectionPerSecond * frameDeltaSeconds);
+  levelRotationX += angleDifference(accelLevelX, levelRotationX) * correction;
+  levelRotationY += angleDifference(accelLevelY, levelRotationY) * correction;
+  limitLevelChange(previousLevelX, previousLevelY);
+}
+
 void updateAgents() {
   for (Agent& agent : agents) {
     Vec3 next = add(agent.position, agent.velocity);
@@ -336,14 +463,17 @@ void updateTouchRotation() {
   static bool touching = false;
   static int16_t previousX = 0;
   static int16_t previousY = 0;
+  const bool wasTouching = touching;
   if (M5.Touch.getCount()) {
     const auto detail = M5.Touch.getDetail(0);
     if (detail.isPressed() || detail.wasPressed()) {
       if (touching) {
-        spinY += (detail.x - previousX) * 0.00085f;
-        spinX += (detail.y - previousY) * 0.00085f;
-        spinX = std::max(-0.11f, std::min(0.11f, spinX));
-        spinY = std::max(-0.11f, std::min(0.11f, spinY));
+        const float deltaX = (detail.y - previousY) * kTouchRadiansPerPixel;
+        const float deltaY = (detail.x - previousX) * kTouchRadiansPerPixel;
+        touchRotationX += deltaX;
+        touchRotationY += deltaY;
+        touchVelocityX = deltaX / frameDeltaSeconds;
+        touchVelocityY = deltaY / frameDeltaSeconds;
       }
       previousX = detail.x;
       previousY = detail.y;
@@ -352,11 +482,35 @@ void updateTouchRotation() {
   } else {
     touching = false;
   }
-  rotationX += spinX;
-  rotationY += spinY;
+
+  if (wasTouching && !touching) touchReleasedMs = millis();
+
+  if (!touching) {
+    touchRotationX += touchVelocityX * frameDeltaSeconds;
+    touchRotationY += touchVelocityY * frameDeltaSeconds;
+    const bool returning = millis() - touchReleasedMs >= kTouchReturnDelayMs;
+    const float damping = returning ? kTouchReturnDampingPerSecond
+                                    : kTouchCoastDampingPerSecond;
+    if (returning) {
+      // Equivalent full turns can be discarded without a visible jump.
+      touchRotationX = atan2f(sinf(touchRotationX), cosf(touchRotationX));
+      touchRotationY = atan2f(sinf(touchRotationY), cosf(touchRotationY));
+      touchVelocityX -=
+          touchRotationX * kTouchReturnSpringPerSecond2 * frameDeltaSeconds;
+      touchVelocityY -=
+          touchRotationY * kTouchReturnSpringPerSecond2 * frameDeltaSeconds;
+    }
+    const float velocityDecay = std::max(
+        0.0f, 1.0f - damping * frameDeltaSeconds);
+    touchVelocityX *= velocityDecay;
+    touchVelocityY *= velocityDecay;
+  }
+
+  autoRotationY += kAutoSpinRadiansPerSecond * frameDeltaSeconds;
+  if (autoRotationY > kTau) autoRotationY -= kTau;
+  rotationX = -levelRotationX + touchRotationX;
+  rotationY = autoRotationY - levelRotationY + touchRotationY;
   updateViewRotationCache();
-  spinX *= 0.994f;
-  spinY = 0.015f + (spinY - 0.015f) * 0.994f;
 }
 
 void drawScene() {
@@ -488,6 +642,7 @@ void reportFps() {
 void setup() {
   auto config = M5.config();
   M5.begin(config);
+  M5.Power.setVibration(0);
   // Serial.begin(115200);  // Enable together with reportFps() for profiling.
   M5.Display.setBrightness(100);
   screenWidth = M5.Display.width();
@@ -514,12 +669,21 @@ void setup() {
     while (true) M5.delay(1000);
   }
   resetGame();
+  previousImuMs = millis();
 }
 
 void loop() {
   M5.update();
-  if (M5.BtnA.wasClicked()) resetGame();
-  if (M5.BtnB.wasClicked()) colorIndex = (colorIndex + 1) % 6;
+  updateHaptic();
+  if (M5.BtnA.wasClicked()) {
+    resetGame();
+    triggerHaptic(160, 50);
+  }
+  if (M5.BtnB.wasClicked()) {
+    colorIndex = (colorIndex + 1) % 6;
+    triggerHaptic(180, 50);
+  }
+  updateImu();
   updateTouchRotation();
   updateAgents();
   drawScene();
